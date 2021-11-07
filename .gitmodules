@@ -1,0 +1,3 @@
+[submodule "edie_detector/scripts/openvino_detector"]
+	path = edie_detector/scripts/openvino_detector
+	url = https://github.com/MilyangParkJaeHun/openvino_detector.git
