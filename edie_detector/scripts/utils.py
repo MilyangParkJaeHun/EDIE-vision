@@ -10,6 +10,7 @@ class ObjectState(Enum):
     STABLE = auto()
     APPROACH = auto()
     FARAWAY = auto()
+    MISS = auto()
 
 class CameraState(Enum):
     NORMAL = 0
@@ -30,6 +31,7 @@ class ZoomCamera():
         self.height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
         self.mode = CameraState.NORMAL
+        self.max_zoom_rate = 1.5
         self.zoom_rate = 1.5
         self.x_center = self.width / 2
         self.y_center = self.height / 2
@@ -43,17 +45,34 @@ class ZoomCamera():
             return ret, self.zoom(frame)
         return ret, frame
 
+    def update(self, center_ratio, width_ratio):
+        self.set_x_center((1 + center_ratio) * self.width / 2)
+        self.set_zoom_rate(-(self.max_zoom_rate - 1) * 5 * width_ratio + self.max_zoom_rate)
+
     def get_width(self):
         return self.width
     
     def get_height(self):
         return self.height
 
+    def get_mode(self):
+        return self.mode
+
+    def get_zoom_rate(self):
+        return self.zoom_rate
+
+    def is_zoom(self):
+        return self.get_mode() == CameraState.ZOOM
+
     def set_x_center(self, x):
         self.x_center = x
     
-    def is_zoom(self):
-        return self.mode == CameraState.ZOOM
+    def set_zoom_rate(self, zoom_rate):
+        if zoom_rate > 1.5:
+            zoom_rate = 1.5
+        if zoom_rate < 1:
+            zoom_rate = 1
+        self.zoom_rate = zoom_rate
 
     def zoom(self, frame):
         x_gap = (self.width / self.zoom_rate) / 2
@@ -85,18 +104,14 @@ class ZoomCamera():
 
     def restore_coord(self, res):
         def restore_x(x):
-            w = self.width
-            zoom_rate = self.zoom_rate
-            x_center = self.x_center
-            restored_x = int(x_center + (x - w / 2) / zoom_rate)
+            x_start = self.x_center - (self.width / 2)/ self.zoom_rate
+            restored_x = x_start + x
 
             return restored_x
         
         def restore_y(y):
-            h = self.height
-            zoom_rate = self.zoom_rate
-            y_center = h - (h / 2) / zoom_rate
-            restored_y = int(y_center + (y - h / 2) / zoom_rate)
+            y_start = self.height - self.height / self.zoom_rate
+            restored_y = y_start + y
 
             return restored_y
 
@@ -105,3 +120,5 @@ class ZoomCamera():
             bbox['xmax'] = restore_x(bbox['xmax'])
             bbox['ymin'] = restore_y(bbox['ymin'])
             bbox['ymax'] = restore_y(bbox['ymax'])
+        
+        return res
