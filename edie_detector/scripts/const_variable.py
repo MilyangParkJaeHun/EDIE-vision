@@ -1,7 +1,9 @@
 BBUF_SIZE = int()
 MAX_AVG_BWIDTH = int()
-MAX_X_RATIO = float()
+MAX_CENTER_RATIO = float()
 MIN_BWIDTH_RATIO = float()
+MAX_MISS_AGE = int()
+
 FRAME_WIDTH = int()
 FRAME_HEIGHT = int()
 INF = 987654321
