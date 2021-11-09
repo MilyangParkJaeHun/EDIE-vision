@@ -14,7 +14,7 @@ sys.path.append(os.path.join(pkg_path, 'scripts'))
 
 from openvino_detector.DetModel import OpenvinoDet
 from openvino_detector.Model.Yolo import Yolo
-from utils import CameraState, ZoomCamera, ObjectState
+from utils import CameraState, SyncState, ZoomCamera, ObjectState
 from const_variable import *
 
 label_map_ = list()
@@ -47,13 +47,15 @@ def build_argparser():
                     help='Required.')
     model_args.add_argument('-d', '--device', required=False, type=str, default='MYRIAD', 
                     help='Optional.')
-    model_args.add_argument('-pt', '--prob_threshold', required=False, type=int, default=0.5, 
+    model_args.add_argument('-pt', '--prob_threshold', required=False, type=float, default=0.5, 
+                    help='Optional.')
+    model_args.add_argument('-s', '--sync_mode', required=False, type=int, default=SyncState.ASYNC.value, 
                     help='Optional.')
 
     return parser
 
 def parse_res(res):
-    global FRAME_WIDTH, FRAME_HEIGHT
+    global FRAME_WIDTH, FRAME_HEIGHT, INF
     object_count = len(res)
     if object_count == 0:
         err = 0
@@ -178,7 +180,7 @@ def main(pub):
             MIN_BWIDTH_RATIO, MAX_CENTER_RATIO
 
     args = build_argparser().parse_args()
-    cap = ZoomCamera(args.input_stream)
+    cap = ZoomCamera(args.input_stream, SyncState(args.sync_mode))
 
     init_process(args, cap)
 
@@ -208,31 +210,32 @@ def main(pub):
             cv2.putText(out_frame, target_state.name, (20, 30), font, 0.7, (255, 0, 0), 2)
             cv2.putText(out_frame, "Zoom : %d%%"%(int(cap.get_zoom_rate()*100)) if cap.is_zoom() else "Normal", \
                         (20, 70), font, 0.7, (0, 255, 0), 2)
-            cv2.imshow("test", out_frame)
+            cv2.imshow("EDIE View", out_frame)
 
             key = cv2.waitKey(1)
             if key == ord('q'):
                 break
-    
+
         if cap.is_zoom():
             res = cap.restore_coord(res)
 
         area_center_ratio, area_width_ratio, max_bbox_width_ratio, avg_bbox_width = parse_res(res)
-        target_state = get_target_state(res, cap.get_mode(), avg_bbox_width)
 
         cap.update(area_center_ratio, max_bbox_width_ratio)
+
+        target_state = get_target_state(res, cap.get_mode(), avg_bbox_width)
         if target_state == ObjectState.STABLE:
             pass
         elif target_state == ObjectState.APPROACH or target_state == ObjectState.MISS:
-            cap.zoom_out()
+            cap.set_mode(CameraState.NORMAL)
         elif target_state == ObjectState.FARAWAY:
-            cap.zoom_in()
+            cap.set_mode(CameraState.ZOOM)
 
         if len(res) > 0:
             if max_bbox_width_ratio < MIN_BWIDTH_RATIO:
-                cap.zoom_in()
+                cap.set_mode(CameraState.ZOOM)
             if abs(area_center_ratio) > MAX_CENTER_RATIO:
-                cap.zoom_out()
+                cap.set_mode(CameraState.NORMAL)
 
         publish_process(pub, area_center_ratio, area_width_ratio, max_bbox_width_ratio)
 
