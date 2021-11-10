@@ -14,6 +14,7 @@ sys.path.append(os.path.join(pkg_path, 'scripts'))
 
 from openvino_detector.DetModel import OpenvinoDet
 from openvino_detector.Model.Yolo import Yolo
+from openvino_detector.Model.Ssd import Ssd
 from utils import CameraState, SyncState, ZoomCamera, ObjectState
 from const_variable import *
 
@@ -51,6 +52,12 @@ def build_argparser():
                     help='Optional.')
     model_args.add_argument('-s', '--sync_mode', required=False, type=int, default=SyncState.ASYNC.value, 
                     help='Optional.')
+
+    model_type_args = parser.add_mutually_exclusive_group(required=True)
+    model_type_args.add_argument('--ssd', action='store_true',
+                    help='[ssd / yolo]')
+    model_type_args.add_argument('--yolo', action='store_true',
+                    help='[ssd / yolo]')
 
     return parser
 
@@ -184,7 +191,11 @@ def main(pub):
 
     init_process(args, cap)
 
-    model = Yolo()
+    if args.yolo:
+        model = Yolo()
+    if args.ssd:
+        model = Ssd()
+
     detector = OpenvinoDet(model_parser=model, \
                         model_path=args.model_path, \
                         device=args.device, \
