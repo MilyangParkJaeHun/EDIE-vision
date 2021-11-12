@@ -16,12 +16,8 @@ class CameraState(Enum):
     NORMAL = 0
     ZOOM = 1
 
-class SyncState(Enum):
-    ASYNC = 0
-    SYNC = 1
-
 class ZoomCamera():
-    def __init__(self, input_stream, sync_mode: SyncState):
+    def __init__(self, input_stream):
         self.cap = cv2.VideoCapture()
         try:
             status = self.cap.open(int(input_stream))
@@ -34,17 +30,11 @@ class ZoomCamera():
         self.width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
         self.height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
-        self.sync_mode = sync_mode
-
         self.mode = CameraState.NORMAL
-        self.before_mode = CameraState.NORMAL
 
         self.max_zoom_rate = 1.5
         self.zoom_rate = 1.5
         self.x_center = self.width / 2
-
-        self.before_zoom_rate = 1.5
-        self.before_x_center = self.width / 2
 
     def read(self):
         ret, frame = self.cap.read()
@@ -56,9 +46,6 @@ class ZoomCamera():
         return ret, frame
 
     def update(self, center_ratio, width_ratio):
-        self.before_zoom_rate = self.zoom_rate
-        self.before_x_center = self.x_center
-
         self.set_x_center((1 + center_ratio) * self.width / 2)
         self.set_zoom_rate(-(self.max_zoom_rate - 1) * 5 * width_ratio + self.max_zoom_rate)
 
@@ -69,22 +56,13 @@ class ZoomCamera():
         return self.height
 
     def get_mode(self):
-        if self.sync_mode == SyncState.ASYNC:
-            return self.before_mode
-        else:
-            return self.mode
+        return self.mode
 
     def get_zoom_rate(self):
-        if self.sync_mode == SyncState.ASYNC:
-            return self.before_zoom_rate
-        else:
-            return self.zoom_rate
+        return self.zoom_rate
 
     def is_zoom(self):
-        if self.sync_mode == SyncState.ASYNC:
-            return self.before_mode == CameraState.ZOOM
-        else:
-            return self.mode == CameraState.ZOOM
+        return self.mode == CameraState.ZOOM
 
     def set_x_center(self, x):
         self.x_center = x
@@ -95,6 +73,9 @@ class ZoomCamera():
         if zoom_rate < 1:
             zoom_rate = 1
         self.zoom_rate = zoom_rate
+
+    def set_mode(self, mode):
+        self.mode = mode
 
     def zoom(self, frame):
         x_gap = (self.width / self.zoom_rate) / 2
@@ -119,34 +100,65 @@ class ZoomCamera():
 
         return frame[ymin:ymax, xmin:xmax]
 
+    def restore_x(self, x, zoom_rate, x_center):
+        x_start = x_center - (self.width / 2) / zoom_rate
+        restored_x = x_start + x
+
+        return restored_x
+
+    def restore_y(self, y, zoom_rate):
+        y_start = self.height - self.height / zoom_rate
+        restored_y = y_start + y
+
+        return restored_y
+
+    def restore_coord(self, res, zoom_rate, x_center):
+        for bbox in res:
+            bbox['xmin'] = self.restore_x(bbox['xmin'], zoom_rate, x_center)
+            bbox['xmax'] = self.restore_x(bbox['xmax'], zoom_rate, x_center)
+            bbox['ymin'] = self.restore_y(bbox['ymin'], x_center)
+            bbox['ymax'] = self.restore_y(bbox['ymax'], x_center)
+
+    def restore_bbox(self, res):
+        zoom_rate = self.zoom_rate
+        x_center = self.x_center
+
+        self.restore_coord(res, zoom_rate, x_center)
+        
+        return res
+
+class AsyncZoomCamera(ZoomCamera):
+    def __init__(self, input_stream):
+        super().__init__(input_stream)
+
+        self.before_mode = CameraState.NORMAL
+        self.before_zoom_rate = 1.5
+        self.before_x_center = self.width / 2
+
+    def update(self, center_ratio, width_ratio):
+        self.before_zoom_rate = self.zoom_rate
+        self.before_x_center = self.x_center
+
+        super().set_x_center((1 + center_ratio) * self.width / 2)
+        super().set_zoom_rate(-(self.max_zoom_rate - 1) * 5 * width_ratio + self.max_zoom_rate)
+
+    def get_mode(self):
+        return self.before_mode
+
+    def get_zoom_rate(self):
+        return self.before_zoom_rate
+
+    def is_zoom(self):
+        return self.before_mode == CameraState.ZOOM
+
     def set_mode(self, mode):
         self.before_mode = self.mode
         self.mode = mode
 
-    def restore_coord(self, res):
-        if self.sync_mode == SyncState.ASYNC:
-            zoom_rate = self.before_zoom_rate
-            x_center = self.before_x_center
-        else:
-            zoom_rate = self.zoom_rate
-            x_center = self.x_center
+    def restore_bbox(self, res):
+        zoom_rate = self.before_zoom_rate
+        x_center = self.before_x_center
 
-        def restore_x(x):
-            x_start = x_center - (self.width / 2) / zoom_rate
-            restored_x = x_start + x
-
-            return restored_x
-        
-        def restore_y(y):
-            y_start = self.height - self.height / zoom_rate
-            restored_y = y_start + y
-
-            return restored_y
-
-        for bbox in res:
-            bbox['xmin'] = restore_x(bbox['xmin'])
-            bbox['xmax'] = restore_x(bbox['xmax'])
-            bbox['ymin'] = restore_y(bbox['ymin'])
-            bbox['ymax'] = restore_y(bbox['ymax'])
+        super().restore_coord(res, zoom_rate, x_center)
         
         return res
