@@ -15,7 +15,7 @@ sys.path.append(os.path.join(pkg_path, 'scripts'))
 from openvino_detector.DetModel import OpenvinoDet
 from openvino_detector.Model.Yolo import Yolo
 from openvino_detector.Model.Ssd import Ssd
-from utils import CameraState, SyncState, ZoomCamera, ObjectState
+from utils import CameraState, ZoomCamera, AsyncZoomCamera, ObjectState
 from const_variable import *
 
 label_map_ = list()
@@ -50,8 +50,9 @@ def build_argparser():
                     help='Optional.')
     model_args.add_argument('-pt', '--prob_threshold', required=False, type=float, default=0.5, 
                     help='Optional.')
-    model_args.add_argument('-s', '--sync_mode', required=False, type=int, default=SyncState.ASYNC.value, 
-                    help='Optional.')
+    model_args.add_argument('--sync', action='store_true', required=False,
+                    help='Optional')
+
 
     model_type_args = parser.add_mutually_exclusive_group(required=True)
     model_type_args.add_argument('--ssd', action='store_true',
@@ -187,7 +188,12 @@ def main(pub):
             MIN_BWIDTH_RATIO, MAX_CENTER_RATIO
 
     args = build_argparser().parse_args()
-    cap = ZoomCamera(args.input_stream, SyncState(args.sync_mode))
+    if args.sync:
+        print('start sync')
+        cap = ZoomCamera(args.input_stream)
+    else:
+        print('start async')
+        cap = AsyncZoomCamera(args.input_stream)
 
     init_process(args, cap)
 
@@ -228,7 +234,7 @@ def main(pub):
                 break
 
         if cap.is_zoom():
-            res = cap.restore_coord(res)
+            res = cap.restore_bbox(res)
 
         area_center_ratio, area_width_ratio, max_bbox_width_ratio, avg_bbox_width = parse_res(res)
 
