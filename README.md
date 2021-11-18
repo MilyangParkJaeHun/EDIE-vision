@@ -3,6 +3,9 @@ Object detection system for EDIE
 
 Supports YOLO and SSD type detection model optimized by OpenVINO
 
+<p align="center">
+<img src=https://user-images.githubusercontent.com/22341340/142421896-257c58a4-bf80-4034-bb22-1cc266f60db9.png width="200" height="100"> <img src=https://user-images.githubusercontent.com/22341340/142421701-f87fc247-4ad4-479f-af06-94f12db6d784.gif width="200" height="100"></p>
+
 # Environments
 - Ubuntu 20.04
 - ROS noetic
