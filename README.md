@@ -7,7 +7,7 @@ Supports YOLO and SSD type detection model optimized by OpenVINO
 - Ubuntu 20.04
 - ROS noetic
 - OpenVINO
-    - [openvino git](https://github.com/openvinotoolkit/openvino) checkout : 3775efd54a48421c0e1c50834a721e8e87bc95e2
+    - [openvino git](https://github.com/openvinotoolkit/openvino) checkpoint : 3775efd54a48421c0e1c50834a721e8e87bc95e2
 - OpenCV 4.5.2-openvino
 
 # Build
