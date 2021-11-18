@@ -46,19 +46,19 @@ class EdieDetector():
         parser = ArgumentParser(add_help=True)
         args = parser.add_argument_group('Common options')
         args.add_argument('-display', '--display', action='store_true',
-                        help="Optional. Show output.")
+                        help="Optional. Display detection output.")
         args.add_argument('-i', '--input_stream', required=False, type=str, default='0', 
-                        help='Optional.')
+                        help='Optional. Camera or video input stream. Default : /dev/video0')
         args.add_argument('-bs', '--bbox_buf_size', required=False, type=int, default=10, 
-                        help='Optional.')
+                        help='Optional. Size of bbox buffer')
         args.add_argument('-maw', '--max_average_bbox_width', required=False, type=int, default=20, 
-                        help='Optional.')
+                        help='Optional. Maximum value of the average width of bbox in buffer')
         args.add_argument('-mcr', '--max_center_ratio', required=False, type=int, default=0.7, 
-                        help='Optional.')
+                        help='Optional. Maximum value of ratio of bbox x coordinate center')
         args.add_argument('-mwr', '--min_bbox_width_ratio', required=False, type=float, default=0.05, 
-                        help='Optional.')
+                        help='Optional. Minimum width ratio of bbox')
         args.add_argument('-mma', '--max_miss_age', required=False, type=int, default=40, 
-                        help='Optional.')
+                        help='Optional. Maximum period to tolerate detection failure')
 
         model_args = parser.add_argument_group('Detection model options')
         model_args.add_argument('-mp', '--model_path', required=True, type=str,
@@ -82,6 +82,16 @@ class EdieDetector():
         return parser
 
     class ConstVariable():
+        """
+        BBUF_SIZE : Size of bbox buffer
+        MAX_AVG_BWIDTH : Maximum value of the average width of bbox in buffer
+        MAX_CENTER_RATIO : Maximum value of ratio of bbox x coordinate center
+        MIN_BWIDTH_RATIO : Minimum width ratio of bbox
+        MAX_MISS_AGE : Maximum period to tolerate detection failure
+        FRAME_WIDTH : Input frame's width
+        FRAME_HEIGHT : Input frame's height
+        INF : Value that means infinity
+        """
         def __init__(self):
             self.BBUF_SIZE = int()
             self.MAX_AVG_BWIDTH = int()
