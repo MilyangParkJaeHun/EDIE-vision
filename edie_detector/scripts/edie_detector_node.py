@@ -126,8 +126,11 @@ class EdieDetector():
                     'darkgreen','beige','brown','gray','black']
         self.target_class_ = self.get_target_class(args.class_config_file)
         self.time_since_detect_ = 0
-        self.bbox_buf_ = [self.CONST.MAX_AVG_BWIDTH for _ in range(self.CONST.BBUF_SIZE)]
+        self.reset_bbox_buf()
     
+    def reset_bbox_buf(self):
+        self.bbox_buf_ = [self.CONST.MAX_AVG_BWIDTH for _ in range(self.CONST.BBUF_SIZE)]
+
     def get_target_class(self, class_config_file):
         with open(class_config_file, 'r') as f:
             line = f.readline().split(':')
@@ -243,6 +246,7 @@ class EdieDetector():
         if len(res) == 0:
             self.time_since_detect_ += 1
             if self.time_since_detect_ > self.CONST.MAX_MISS_AGE:
+                self.reset_bbox_buf()
                 return ObjectState.MISS
             else:
                 return ObjectState.STABLE
