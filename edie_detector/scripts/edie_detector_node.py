@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+    edie_detector_node.py
+    Author: Park Jaehun
+    Purpose
+        Object Detection Vision System for EDIE        
+"""
 import os
 import cv2
 from argparse import ArgumentParser

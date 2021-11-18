@@ -1,3 +1,9 @@
+"""
+    utils.py
+    Author: Park Jaehun
+    Purpose
+        Collection of useful classes for EdieDetector        
+"""
 import cv2
 from enum import Enum, auto
 
