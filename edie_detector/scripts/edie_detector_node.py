@@ -16,251 +16,255 @@ from openvino_detector.DetModel import OpenvinoDet
 from openvino_detector.Model.Yolo import Yolo
 from openvino_detector.Model.Ssd import Ssd
 from utils import CameraState, ZoomCamera, AsyncZoomCamera, ObjectState
-from const_variable import *
+ 
+class EdieDetector():
+    def __init__(self):
+        args = self.build_argparser().parse_args()
 
-label_map_ = list()
-target_class_ = int()
-time_since_detect_ = int()
-bbox_buf_ = list()
-
-def build_argparser():
-    parser = ArgumentParser(add_help=True)
-    args = parser.add_argument_group('Common options')
-    args.add_argument('-show_on', '--show_on', action='store_true',
-                    help="Optional. Show output.")
-    args.add_argument('-i', '--input_stream', required=False, type=str, default='0', 
-                    help='Optional.')
-    args.add_argument('-bs', '--bbox_buf_size', required=False, type=int, default=10, 
-                    help='Optional.')
-    args.add_argument('-maw', '--max_average_bbox_width', required=False, type=int, default=20, 
-                    help='Optional.')
-    args.add_argument('-mcr', '--max_center_ratio', required=False, type=int, default=0.7, 
-                    help='Optional.')
-    args.add_argument('-mwr', '--min_bbox_width_ratio', required=False, type=float, default=0.05, 
-                    help='Optional.')
-    args.add_argument('-mma', '--max_miss_age', required=False, type=int, default=40, 
-                    help='Optional.')
-
-    model_args = parser.add_argument_group('Detection model options')
-    model_args.add_argument('-mp', '--model_path', required=True, type=str,
-                    help='Required.')
-    model_args.add_argument('-cf', '--class_config_file', required=True, type=str, 
-                    help='Required.')
-    model_args.add_argument('-d', '--device', required=False, type=str, default='MYRIAD', 
-                    help='Optional.')
-    model_args.add_argument('-pt', '--prob_threshold', required=False, type=float, default=0.5, 
-                    help='Optional.')
-    model_args.add_argument('--sync', action='store_true', required=False,
-                    help='Optional')
-
-
-    model_type_args = parser.add_mutually_exclusive_group(required=True)
-    model_type_args.add_argument('--ssd', action='store_true',
-                    help='[ssd / yolo]')
-    model_type_args.add_argument('--yolo', action='store_true',
-                    help='[ssd / yolo]')
-
-    return parser
-
-def parse_res(res):
-    global FRAME_WIDTH, FRAME_HEIGHT, INF
-    object_count = len(res)
-    if object_count == 0:
-        err = 0
-        return err, err, err, err
-
-    area_xmin = INF
-    area_xmax = 0
-
-    max_bbox_width = 0
-    avg_bbox_width = 0
-
-    x_center_sum = 0
-    width_sum = 0
-
-    for bbox in res:
-        xmin, xmax = bbox['xmin'], bbox['xmax']
-        x_center_sum += (xmin + xmax) / 2
-        
-        if area_xmin > xmin:
-            area_xmin = xmin
-        if area_xmax < xmax:
-            area_xmax = xmax
-        if max_bbox_width < (xmax - xmin):
-            max_bbox_width = xmax - xmin
-        width_sum += xmax - xmin
-    avg_x_center = x_center_sum / object_count
-
-    area_center_ratio = (avg_x_center - FRAME_WIDTH / 2) / (FRAME_WIDTH / 2)
-    area_width_ratio = (area_xmax - area_xmin) / FRAME_WIDTH
-    max_bbox_width_ratio = max_bbox_width / FRAME_WIDTH
-    avg_bbox_width = width_sum / object_count
-
-    return area_center_ratio, area_width_ratio, max_bbox_width_ratio, avg_bbox_width
-
-def get_target_state(res, cap_mode, avg_bbox_width):
-    global time_since_detect_, MAX_MISS_AGE
-
-    def is_outlier(value):
-        return abs(bbox_buf_[-1] - value) > 20
-
-    def is_closer(ratio):
-        return ratio >= 0.25
-    
-    def is_far(ratio):
-        return ratio <= -0.1
-
-    if len(res) == 0:
-        time_since_detect_ += 1
-        if time_since_detect_ > MAX_MISS_AGE:
-            return ObjectState.MISS
+        if args.sync:
+            cap = ZoomCamera(args.input_stream)
         else:
-            return ObjectState.STABLE
-    else:
-        time_since_detect_ = 0
+            cap = AsyncZoomCamera(args.input_stream)
+        self.cap = cap
 
-        if is_outlier(avg_bbox_width):
-            return ObjectState.STABLE
-        else:
-            object_state = ObjectState.STABLE
+        self.init_variable(args)
 
-            avg_buf_width = sum(bbox_buf_) / len(bbox_buf_)
-            ratio = (avg_bbox_width - avg_buf_width) / avg_buf_width
+        if args.yolo:
+            model_parser = Yolo()
+        if args.ssd:
+            model_parser = Ssd()
 
-            if cap_mode == CameraState.ZOOM:
-                if is_closer(ratio):
-                    object_state = ObjectState.APPROACH
-            else:
-                if is_far(ratio):
-                    object_state = ObjectState.FARAWAY
-
-            bbox_buf_.pop(0)
-            bbox_buf_.append(avg_bbox_width)
-            
-            return object_state
-
-def get_target_class(class_config_file):
-    global target_class_
-
-    with open(class_config_file, 'r') as f:
-        line = f.readline().split(':')
-    class_id = int(line[1]) - 1
-
-    return class_id
-
-def filter_class(bboxs, target):
-    def is_target(bbox):
-        class_id = bbox['class_id']
-        return class_id == target
-    return list(filter(is_target, bboxs))
-
-def init_process(args, cap):
-    global label_map_, target_class_, bbox_buf_, time_since_detect_, \
-            BBUF_SIZE, MAX_AVG_BWIDTH, MAX_CENTER_RATIO, \
-            MIN_BWIDTH_RATIO, MAX_MISS_AGE , FRAME_WIDTH, FRAME_HEIGHT
-
-    BBUF_SIZE = args.bbox_buf_size
-    MAX_AVG_BWIDTH = args.max_average_bbox_width
-    MAX_CENTER_RATIO = args.max_center_ratio
-    MIN_BWIDTH_RATIO = args.min_bbox_width_ratio
-    MAX_MISS_AGE = args.max_miss_age
-
-    FRAME_WIDTH = cap.get_width()
-    FRAME_HEIGHT = cap.get_height()
-    
-    label_map_ = ['white','red','orange','yellow','green',
-                'sky','blue','mint','pink','purple',
-                'darkgreen','beige','brown','gray','black']
-    target_class_ = get_target_class(args.class_config_file)
-    time_since_detect_ = 0
-    bbox_buf_ = [MAX_AVG_BWIDTH for _ in range(BBUF_SIZE)]
-
-def publish_process(pub, area_center_ratio, area_width_ratio, max_bbox_width_ratio):
-    edie_view_msgs = EdieView()
-    edie_view_msgs.area_center_ratio = area_center_ratio
-    edie_view_msgs.area_ratio = area_width_ratio
-    edie_view_msgs.max_box_ratio = max_bbox_width_ratio
-
-    pub.publish(edie_view_msgs)
-
-def main(pub):
-    global label_map_, target_class_, bbox_buf_, time_since_detect_, \
-            MIN_BWIDTH_RATIO, MAX_CENTER_RATIO
-
-    args = build_argparser().parse_args()
-    if args.sync:
-        print('start sync')
-        cap = ZoomCamera(args.input_stream)
-    else:
-        print('start async')
-        cap = AsyncZoomCamera(args.input_stream)
-
-    init_process(args, cap)
-
-    if args.yolo:
-        model = Yolo()
-    if args.ssd:
-        model = Ssd()
-
-    detector = OpenvinoDet(model_parser=model, \
+        self.detector = OpenvinoDet(model_parser=model_parser, \
                         model_path=args.model_path, \
                         device=args.device, \
-                        label_map=label_map_, \
+                        label_map=self.label_map_, \
                         prob_threshold=args.prob_threshold)
 
-    target_state = ObjectState.STABLE
-    while not rospy.is_shutdown():
-        ret, frame = cap.read()
-        if not ret:
-            break
+        self.display_flag = args.display
     
-        res = detector.inference(frame)
-        res = filter_class(res, target_class_)
+    def build_argparser(self):
+        parser = ArgumentParser(add_help=True)
+        args = parser.add_argument_group('Common options')
+        args.add_argument('-display', '--display', action='store_true',
+                        help="Optional. Show output.")
+        args.add_argument('-i', '--input_stream', required=False, type=str, default='0', 
+                        help='Optional.')
+        args.add_argument('-bs', '--bbox_buf_size', required=False, type=int, default=10, 
+                        help='Optional.')
+        args.add_argument('-maw', '--max_average_bbox_width', required=False, type=int, default=20, 
+                        help='Optional.')
+        args.add_argument('-mcr', '--max_center_ratio', required=False, type=int, default=0.7, 
+                        help='Optional.')
+        args.add_argument('-mwr', '--min_bbox_width_ratio', required=False, type=float, default=0.05, 
+                        help='Optional.')
+        args.add_argument('-mma', '--max_miss_age', required=False, type=int, default=40, 
+                        help='Optional.')
 
-        if args.show_on:
-            out_frame = detector.get_results_img(res)
-            if cap.is_zoom():
-                width = int(cap.get_width())
-                height = int(cap.get_height())
-                out_frame = cv2.resize(out_frame, (width, height), interpolation=cv2.INTER_CUBIC)
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            cv2.putText(out_frame, target_state.name, (20, 30), font, 0.7, (255, 0, 0), 2)
-            cv2.putText(out_frame, "Zoom : %d%%"%(int(cap.get_zoom_rate()*100)) if cap.is_zoom() else "Normal", \
-                        (20, 70), font, 0.7, (0, 255, 0), 2)
-            cv2.imshow("EDIE View", out_frame)
+        model_args = parser.add_argument_group('Detection model options')
+        model_args.add_argument('-mp', '--model_path', required=True, type=str,
+                        help='Required.')
+        model_args.add_argument('-cf', '--class_config_file', required=True, type=str, 
+                        help='Required.')
+        model_args.add_argument('-d', '--device', required=False, type=str, default='MYRIAD', 
+                        help='Optional.')
+        model_args.add_argument('-pt', '--prob_threshold', required=False, type=float, default=0.5, 
+                        help='Optional.')
+        model_args.add_argument('--sync', action='store_true', required=False,
+                        help='Optional')
 
-            key = cv2.waitKey(1)
-            if key == ord('q'):
+
+        model_type_args = parser.add_mutually_exclusive_group(required=True)
+        model_type_args.add_argument('--ssd', action='store_true',
+                        help='[ssd / yolo]')
+        model_type_args.add_argument('--yolo', action='store_true',
+                        help='[ssd / yolo]')
+
+        return parser
+
+    class ConstVariable():
+        def __init__(self):
+            self.BBUF_SIZE = int()
+            self.MAX_AVG_BWIDTH = int()
+            self.MAX_CENTER_RATIO = float()
+            self.MIN_BWIDTH_RATIO = float()
+            self.MAX_MISS_AGE = int()
+
+            self.FRAME_WIDTH = int()
+            self.FRAME_HEIGHT = int()
+            self.INF = 987654321
+
+    def init_variable(self, args):
+        self.CONST = self.ConstVariable()
+
+        self.CONST.BBUF_SIZE = args.bbox_buf_size
+        self.CONST.MAX_AVG_BWIDTH = args.max_average_bbox_width
+        self.CONST.MAX_CENTER_RATIO = args.max_center_ratio
+        self.CONST.MIN_BWIDTH_RATIO = args.min_bbox_width_ratio
+        self.CONST.MAX_MISS_AGE = args.max_miss_age
+
+        self.CONST.FRAME_WIDTH = int(self.cap.get_width())
+        self.CONST.FRAME_HEIGHT = int(self.cap.get_height())
+        
+        self.label_map_ = ['white','red','orange','yellow','green',
+                    'sky','blue','mint','pink','purple',
+                    'darkgreen','beige','brown','gray','black']
+        self.target_class_ = self.get_target_class(args.class_config_file)
+        self.time_since_detect_ = 0
+        self.bbox_buf_ = [self.CONST.MAX_AVG_BWIDTH for _ in range(self.CONST.BBUF_SIZE)]
+    
+    def get_target_class(self, class_config_file):
+        with open(class_config_file, 'r') as f:
+            line = f.readline().split(':')
+        class_id = int(line[1]) - 1
+
+        return class_id
+
+    def main(self, pub):
+        target_state = ObjectState.STABLE
+
+        while not rospy.is_shutdown():
+            
+            ret, frame = self.cap.read()
+            if not ret:
                 break
+        
+            res = self.detector.inference(frame)
+            res = self.filter_class(res, self.target_class_)
 
-        if cap.is_zoom():
-            res = cap.restore_bbox(res)
+            if self.display_flag:
+                out_frame = self.detector.get_results_img(res)
+                if self.cap.is_zoom():
+                    out_frame = cv2.resize(out_frame, (self.CONST.FRAME_WIDTH, self.CONST.FRAME_HEIGHT), interpolation=cv2.INTER_CUBIC)
 
-        area_center_ratio, area_width_ratio, max_bbox_width_ratio, avg_bbox_width = parse_res(res)
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(out_frame, target_state.name, (20, 30), font, 0.7, (255, 0, 0), 2)
+                cv2.putText(out_frame, "Zoom : %d%%"%(int(self.cap.get_zoom_rate()*100)) if self.cap.is_zoom() else "Normal", \
+                            (20, 70), font, 0.7, (0, 255, 0), 2)
+                cv2.imshow("EDIE View", out_frame)
 
-        cap.update(area_center_ratio, max_bbox_width_ratio)
+                key = cv2.waitKey(1)
+                if key == ord('q'):
+                    break
 
-        target_state = get_target_state(res, cap.get_mode(), avg_bbox_width)
-        if target_state == ObjectState.STABLE:
-            pass
-        elif target_state == ObjectState.APPROACH or target_state == ObjectState.MISS:
-            cap.set_mode(CameraState.NORMAL)
-        elif target_state == ObjectState.FARAWAY:
-            cap.set_mode(CameraState.ZOOM)
+            if self.cap.is_zoom():
+                res = self.cap.restore_bbox(res)
 
-        if len(res) > 0:
-            if max_bbox_width_ratio < MIN_BWIDTH_RATIO:
-                cap.set_mode(CameraState.ZOOM)
-            if abs(area_center_ratio) > MAX_CENTER_RATIO:
-                cap.set_mode(CameraState.NORMAL)
+            area_center_ratio, area_width_ratio, max_bbox_width_ratio, avg_bbox_width = self.parse_res(res)
 
-        publish_process(pub, area_center_ratio, area_width_ratio, max_bbox_width_ratio)
+            self.cap.update(area_center_ratio, max_bbox_width_ratio)
 
-    cv2.destroyAllWindows()
+            target_state = self.get_target_state(res, self.cap.get_mode(), avg_bbox_width)
+            if target_state == ObjectState.STABLE:
+                pass
+            elif target_state == ObjectState.APPROACH or target_state == ObjectState.MISS:
+                self.cap.set_mode(CameraState.NORMAL)
+            elif target_state == ObjectState.FARAWAY:
+                self.cap.set_mode(CameraState.ZOOM)
+
+            if len(res) > 0:
+                if max_bbox_width_ratio < self.CONST.MIN_BWIDTH_RATIO:
+                    self.cap.set_mode(CameraState.ZOOM)
+                if abs(area_center_ratio) > self.CONST.MAX_CENTER_RATIO:
+                    self.cap.set_mode(CameraState.NORMAL)
+
+            self.publish_process(pub, area_center_ratio, area_width_ratio, max_bbox_width_ratio)
+
+        cv2.destroyAllWindows()
+
+    def filter_class(self, bboxs, target):
+        def is_target(bbox):
+            class_id = bbox['class_id']
+            return class_id == target
+        return list(filter(is_target, bboxs))
+    
+    def parse_res(self, res):
+        object_count = len(res)
+        if object_count == 0:
+            err = 0
+            return err, err, err, err
+
+        area_xmin = self.CONST.INF
+        area_xmax = 0
+
+        max_bbox_width = 0
+        avg_bbox_width = 0
+
+        x_center_sum = 0
+        width_sum = 0
+
+        for bbox in res:
+            xmin, xmax = bbox['xmin'], bbox['xmax']
+            x_center_sum += (xmin + xmax) / 2
+            
+            if area_xmin > xmin:
+                area_xmin = xmin
+            if area_xmax < xmax:
+                area_xmax = xmax
+            if max_bbox_width < (xmax - xmin):
+                max_bbox_width = xmax - xmin
+            width_sum += xmax - xmin
+        avg_x_center = x_center_sum / object_count
+
+        frame_width = self.CONST.FRAME_WIDTH
+        area_center_ratio = (avg_x_center - frame_width / 2) / (frame_width / 2)
+        area_width_ratio = (area_xmax - area_xmin) / frame_width
+        max_bbox_width_ratio = max_bbox_width / frame_width
+        avg_bbox_width = width_sum / object_count
+
+        return area_center_ratio, area_width_ratio, max_bbox_width_ratio, avg_bbox_width
+    
+    def get_target_state(self, res, cap_mode, avg_bbox_width):
+
+        def is_outlier(value):
+            return abs(self.bbox_buf_[-1] - value) > 20
+
+        def is_closer(ratio):
+            return ratio >= 0.25
+        
+        def is_far(ratio):
+            return ratio <= -0.1
+
+        if len(res) == 0:
+            self.time_since_detect_ += 1
+            if self.time_since_detect_ > self.CONST.MAX_MISS_AGE:
+                return ObjectState.MISS
+            else:
+                return ObjectState.STABLE
+        else:
+            self.time_since_detect_ = 0
+
+            if is_outlier(avg_bbox_width):
+                return ObjectState.STABLE
+            else:
+                object_state = ObjectState.STABLE
+
+                avg_buf_width = sum(self.bbox_buf_) / len(self.bbox_buf_)
+                ratio = (avg_bbox_width - avg_buf_width) / avg_buf_width
+
+                if cap_mode == CameraState.ZOOM:
+                    if is_closer(ratio):
+                        object_state = ObjectState.APPROACH
+                else:
+                    if is_far(ratio):
+                        object_state = ObjectState.FARAWAY
+
+                self.bbox_buf_.pop(0)
+                self.bbox_buf_.append(avg_bbox_width)
+                
+                return object_state
+    
+    def publish_process(self, pub, area_center_ratio, area_width_ratio, max_bbox_width_ratio):
+        edie_view_msgs = EdieView()
+        edie_view_msgs.area_center_ratio = area_center_ratio
+        edie_view_msgs.area_ratio = area_width_ratio
+        edie_view_msgs.max_box_ratio = max_bbox_width_ratio
+
+        pub.publish(edie_view_msgs)
 
 if __name__ == "__main__":
     rospy.init_node('edie_detector_node', anonymous=False)
 
     pub = rospy.Publisher('/edie/view', EdieView, queue_size=1)
 
-    main(pub)
+    edie_detector = EdieDetector()
+    edie_detector.main(pub)
